@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>SCARIF_ARMADA // MOBILE_UNIVERSAL_V13</title>
+<style>
+:root { --bg:#050508; --accent:#ffe81f; --player:#00f2ff; --tie:#ff4d4d; --int:#ff0055; --bomber:#880022; }
+body { 
+    margin:0; background:#000; color:white; font-family: monospace; 
+    overflow:hidden; touch-action: none; display:flex; justify-content:center; align-items:center; height: 100dvh; 
+}
+
+#main-container { width: 95vw; max-width: 1100px; display: flex; flex-direction: column; gap: 5px; transition: opacity 0.3s; }
+
+header { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #222; font-size: 14px; }
+.badge { padding: 4px 12px; border: 1px solid #00f2ff44; border-radius: 4px; color: var(--player); font-weight: bold; }
+
+#game-viewport { 
+    position: relative; width: 100%; aspect-ratio: 16 / 9; 
+    background: #000; border-radius: 12px; border: 1px solid #1a1a2e; overflow: hidden; 
+}
+canvas { width: 100%; height: 100%; display: block; cursor: none; }
+
+#prank-window { position: fixed; inset: 0; background: #000; display: none; z-index: 9999; }
+video { width: 100%; height: 100%; object-fit: contain; }
+
+#start-screen { 
+    position: absolute; inset: 0; background: rgba(0,0,0,0.95); 
+    display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 200; 
+}
+.btn { border: 2px solid var(--accent); padding: 15px 40px; background: transparent; color: var(--accent); font-weight: bold; cursor: pointer; font-size: 1.2rem; letter-spacing: 2px; }
+
+aside { display: flex; gap: 10px; width: 100%; }
+.panel { flex: 1; padding: 10px; background: rgba(255,255,255,0.03); border: 1px solid #222; border-radius: 8px; font-size: 11px; }
+
+#crosshair { position:absolute; width:30px; height:30px; border:1px solid var(--player); border-radius:50%; pointer-events:none; transform:translate(-50%, -50%); z-index:100; display: none; }
+</style>
+</head>
+<body>
+
+<audio id="bg-music" src="bg.mp3" loop></audio>
+
+<div id="prank-window">
+    <video id="vid" src="alekh.mp4" playsinline muted></video>
+</div>
+
+<div id="main-container">
+    <header>
+        <div style="font-weight:bold; color:var(--player)">ARMADA_BREACH // V13</div>
+        <div class="badge">SYNC: <span id="time-ui">15</span>s</div>
+    </header>
+
+    <div id="game-viewport">
+        <div id="start-screen">
+            <h2 style="color:var(--player); letter-spacing: 5px;">NEURAL LINK</h2>
+            <button class="btn" id="start-btn">INITIATE BYPASS</button>
+        </div>
+        <canvas id="c"></canvas>
+        <div id="crosshair"></div>
+    </div>
+
+    <aside>
+        <div class="panel">
+            <div style="color:#0f0; margin-bottom:5px;">[UPLINK_STATUS]</div>
+            KILLS: <span id="k-total" style="color:white">0</span> | SCORE: <span id="score-ui" style="color:white">0</span>
+        </div>
+        <div class="panel" style="color:#777;">
+            <b>THREATS:</b> TIE (Fast), Interceptor (Dbl Shot), Shuttle (Heavy)
+        </div>
+    </aside>
+</div>
+
+<script>
+const c = document.getElementById("c");
+const ctx = c.getContext("2d");
+const viewport = document.getElementById("game-viewport");
+const vid = document.getElementById("vid");
+const music = document.getElementById("bg-music");
+const ch = document.getElementById("crosshair");
+
+c.width = 1280; c.height = 720;
+
+let gameActive = false, score = 0, startTime, frames = 0, totalKills = 0;
+let bullets = [], enemies = [], enemyBullets = [];
+
+// ROYAL BEHEMOTH SHIP
+const player = { x: 100, y: 320, w: 120, h: 80, targetY: 320, invuln: 0 };
+
+function updatePointer(clientX, clientY) {
+    if(!gameActive) return;
+    const rect = c.getBoundingClientRect();
+    const scaleY = c.height / rect.height;
+    const y = (clientY - rect.top) * scaleY;
+    ch.style.display = "block";
+    ch.style.left = (clientX - rect.left) + "px";
+    ch.style.top = (clientY - rect.top) + "px";
+    player.targetY = y - player.h/2;
+}
+
+viewport.addEventListener("mousemove", (e) => updatePointer(e.clientX, e.clientY));
+viewport.addEventListener("touchmove", (e) => { e.preventDefault(); updatePointer(e.touches[0].clientX, e.touches[0].clientY); }, {passive: false});
+viewport.addEventListener("touchstart", (e) => { e.preventDefault(); updatePointer(e.touches[0].clientX, e.touches[0].clientY); }, {passive: false});
+
+document.getElementById('start-btn').addEventListener('click', startGame);
+
+function startGame() {
+    gameActive = true; startTime = Date.now();
+    document.getElementById('start-screen').style.display = 'none';
+    music.play().catch(() => {});
+    vid.play().then(() => { vid.pause(); vid.muted = false; }).catch(() => {});
+    loop();
+}
+
+function triggerPrank() {
+    gameActive = false;
+    document.getElementById("main-container").style.display = "none";
+    document.getElementById("prank-window").style.display = "block";
+    vid.currentTime = 0; vid.muted = false; vid.play(); music.pause();
+}
+
+function drawPlayer(x, y) {
+    ctx.save(); ctx.translate(x, y);
+    if(player.invuln > 0 && frames % 10 < 5) ctx.globalAlpha = 0.3;
+    ctx.shadowBlur = 30; ctx.shadowColor = "#00f2ff";
+    ctx.fillStyle = "#00f2ff";
+    ctx.fillRect(0, 25, 120, 30); // Main Core
+    ctx.fillRect(10, 0, 15, 80);   // Back Fin
+    ctx.fillStyle = "#fff"; ctx.fillRect(50, 30, 30, 15); // Bridge
+    ctx.restore();
+}
+
+function loop() {
+    if(!gameActive) return;
+    requestAnimationFrame(loop);
+
+    let elapsed = Date.now() - startTime;
+    let remain = Math.max(0, 15 - Math.floor(elapsed/1000));
+    document.getElementById("time-ui").innerText = remain;
+
+    if (elapsed >= 15000) { triggerPrank(); return; }
+
+    // Auto-fire logic
+    if (frames % 12 === 0) bullets.push({ x: player.x + 110, y: player.y + 15 }, { x: player.x + 110, y: player.y + 65 });
+
+    player.y += (player.targetY - player.y) * 0.15;
+    player.y = Math.max(0, Math.min(c.height - player.h, player.y));
+    if(player.invuln > 0) player.invuln--;
+
+    // ENEMY SPAWNING LOGIC (Different Types)
+    if(frames % 40 === 0) {
+        const type = Math.random();
+        if(type < 0.6) enemies.push({ t:'tie', x: 1350, y: Math.random()*680, s: 10, h: 1, sz: 40, c: '#ff4d4d' });
+        else if(type < 0.9) enemies.push({ t:'int', x: 1350, y: Math.random()*680, s: 14, h: 1, sz: 35, c: '#ff0055' });
+        else enemies.push({ t:'shuttle', x: 1350, y: Math.random()*600, s: 4, h: 5, sz: 80, c: '#880022' });
+    }
+
+    enemies.forEach((e, i) => {
+        e.x -= e.s;
+        
+        // Enemy Firing
+        if(e.t === 'int' && frames % 60 === 0) enemyBullets.push({ x: e.x, y: e.y + 15, vx: -15, c: e.c });
+        if(e.t === 'shuttle' && frames % 100 === 0) {
+            for(let k=-1; k<=1; k++) enemyBullets.push({ x: e.x, y: e.y + 40, vx: -8, vy: k*3, c: e.c });
+        }
+
+        // Collision Check
+        if (player.invuln <= 0 && player.x < e.x + e.sz && player.x + player.w > e.x && player.y < e.y + e.sz && player.y + player.h > e.y) {
+            player.invuln = 60; score = Math.max(0, score-100);
+        }
+
+        bullets.forEach((b, bi) => {
+            if(b.x > e.x && b.x < e.x + e.sz && b.y > e.y && b.y < e.y + e.sz) {
+                e.h--; bullets.splice(bi, 1);
+                if(e.h <= 0) {
+                    enemies.splice(i, 1); score += 100; totalKills++;
+                    document.getElementById('k-total').innerText = totalKills;
+                    document.getElementById('score-ui').innerText = score;
+                }
+            }
+        });
+        if(e.x < -100) enemies.splice(i, 1);
+    });
+
+    bullets.forEach((b, i) => { b.x += 25; if(b.x > 1300) bullets.splice(i,1); });
+    enemyBullets.forEach((eb, i) => {
+        eb.x += eb.vx; eb.y += (eb.vy || 0);
+        if (player.invuln <= 0 && eb.x < player.x + player.w && eb.x > player.x && eb.y < player.y + player.h && eb.y > player.y) {
+            player.invuln = 60;
+        }
+        if(eb.x < -50) enemyBullets.splice(i, 1);
+    });
+
+    // RENDER
+    ctx.fillStyle = "#000"; ctx.fillRect(0,0,c.width,c.height);
+    ctx.strokeStyle = '#111';
+    for(let i=0; i<c.width; i+=100) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,c.height); ctx.stroke(); }
+
+    drawPlayer(player.x, player.y);
+    
+    // Draw FX
+    ctx.fillStyle = "white"; bullets.forEach(b => ctx.fillRect(b.x, b.y, 30, 5));
+    enemyBullets.forEach(eb => { ctx.fillStyle = eb.c; ctx.fillRect(eb.x, eb.y, 25, 6); });
+    
+    enemies.forEach(e => {
+        ctx.fillStyle = e.c;
+        if(e.t === 'tie') ctx.fillRect(e.x, e.y, e.sz, e.sz);
+        else if(e.t === 'int') {
+            ctx.beginPath(); ctx.moveTo(e.x+e.sz, e.y+e.sz/2); ctx.lineTo(e.x, e.y); ctx.lineTo(e.x, e.y+e.sz); ctx.fill();
+        } else {
+            ctx.fillRect(e.x, e.y, e.sz, e.sz*0.7);
+            ctx.fillStyle = "white"; ctx.fillRect(e.x+10, e.y+15, 20, 20);
+        }
+    });
+
+    frames++;
+}
+</script>
+</body>
+</html>
